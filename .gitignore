@@ -1,0 +1,7 @@
+build/
+__pycache__/
+*.mkv
+*.mp4
+reports/
+*.png
+*.html
