@@ -5,3 +5,26 @@ __pycache__/
 reports/
 *.png
 *.html
+
+# C++ Build artifacts
+*.o
+*.obj
+*.so
+*.dylib
+*.dll
+*.exe
+*.out
+a.out
+
+# Build directories
+build/
+bin/
+debug/
+release/
+cmake-build-*/
+
+# IDE files
+.vscode/
+.idea/
+*.vcxproj*
+*.sln
