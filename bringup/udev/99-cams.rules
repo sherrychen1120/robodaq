@@ -1,3 +1,0 @@
-# Persistent camera naming (fill in real serials with udevadm info)
-# SUBSYSTEM=="video4linux", ATTRS{serial}=="SERIAL_FRONT", SYMLINK+="cam_front"
-# SUBSYSTEM=="video4linux", ATTRS{serial}=="SERIAL_SIDE",  SYMLINK+="cam_side"
