@@ -5,8 +5,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgstreamer1.0-dev \
+            libgstreamer-plugins-base1.0-dev \
+            libgstreamer-plugins-bad1.0-dev \
+            libgstreamer-plugins-good1.0-dev \
+            libgstreamer-plugins-ugly1.0-dev \
+            libopencv-dev \
+            pkg-config
       - name: Configure & Build
         run: |
+          cd recorder
           mkdir -p build && cd build
           cmake ..
           make -j

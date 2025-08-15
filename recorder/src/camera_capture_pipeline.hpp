@@ -1,103 +1,76 @@
-#ifndef CAMERA_CAPTURE_PIPELINE_H
-#define CAMERA_CAPTURE_PIPELINE_H
+#pragma once
 
 #include <gst/gst.h>
+#include <gst/app/gstappsink.h>
 #include <string>
+#include <functional>
+#include <iostream>
+#include <chrono>
+#include <vector>
+#include <cstdint>
+#include <cstring>
+
+enum class SinkMode {
+    DISPLAY,  // Use fpsdisplaysink for visual output
+    APPSINK   // Use appsink for programmatic frame access
+};
+
+enum class CameraFormat {
+    YUYV,     // YUV 4:2:2 packed format (native to most USB cameras)
+    RGB,      // RGB format
+    GRAY      // Grayscale
+};
+
+// Camera capture configuration
+constexpr CameraFormat CAMERA_CAPTURE_FORMAT = CameraFormat::YUYV;
+
+// Camera frame structure containing all frame data
+struct CameraFrame {
+    uint64_t sequence_number;
+    uint64_t timestamp_us;  // Timestamp in microseconds
+    std::string device_name;
+    std::vector<uint8_t> image_data;
+    int width;
+    int height;
+    CameraFormat format;
+
+    CameraFrame() 
+    : sequence_number(0), timestamp_us(0), 
+      width(0), height(0), format(CameraFormat::YUYV) {}
+};
+
+// Callback type for frame processing
+using FrameCallback = std::function<void(const CameraFrame& frame, bool trigger_record)>;
 
 class CameraPipeline {
 private:
-    GstElement *pipeline, *source, *capsfilter, *queue, *sink;
-    bool gst_initialized;
+    GstElement *pipeline_, *source_, *capsfilter_, *queue_, *sink_;
+    bool gst_initialized_;
+    SinkMode sink_mode_;
+    FrameCallback frame_callback_;
+    std::string device_name_;
+    bool trigger_record_;
+    uint64_t sequence_counter_;
+    CameraFormat camera_format_;
     
+    // Static callback function for appsink
+    static GstFlowReturn on_new_sample_(GstAppSink* appsink, gpointer user_data);
+
 public:
-    CameraPipeline() 
-    : pipeline(nullptr), source(nullptr), capsfilter(nullptr), 
-      queue(nullptr), sink(nullptr), gst_initialized(false) {}
+    CameraPipeline();
+    ~CameraPipeline();
     
     bool initialize(
         const std::string& device, 
         int width, 
         int height,
         int framerate,
+        SinkMode mode = SinkMode::DISPLAY,
+        FrameCallback callback = nullptr,
+        bool trigger_record_flag = false,
         bool enable_fps_debug = false
-) {
-        // Initialize GStreamer
-        if (!gst_initialized) {
-            gst_init(nullptr, nullptr);
-            gst_initialized = true;
-            
-            // Enable FPS debug logging if requested
-            if (enable_fps_debug) {
-                gst_debug_set_threshold_for_name("fpsdisplaysink", GST_LEVEL_LOG);
-            }
-        }
-        
-        pipeline = gst_pipeline_new("camera-pipeline");
-        source = gst_element_factory_make("v4l2src", "camera-source");
-        capsfilter = gst_element_factory_make("capsfilter", "caps-filter");
-        queue = gst_element_factory_make("queue", "ring-buffer");
-        sink = gst_element_factory_make("fpsdisplaysink", "fps-sink");
-        
-        // Check if elements were created successfully
-        if (!pipeline || !source || !capsfilter || !queue || !sink) {
-            g_printerr("Failed to create GStreamer elements\n");
-            return false;
-        }
-        
-        // Create caps for video format
-        GstCaps *caps = gst_caps_new_simple("video/x-raw",
-            "width", G_TYPE_INT, width,
-            "height", G_TYPE_INT, height,
-            "framerate", GST_TYPE_FRACTION, framerate, 1,
-            nullptr);
-        g_object_set(capsfilter, "caps", caps, nullptr);
-        gst_caps_unref(caps);
-        
-        // Set properties
-        g_object_set(source, "device", device.c_str(), nullptr);
-        g_object_set(queue, "max-size-buffers", 30, nullptr);
-        g_object_set(queue, "leaky", 2, nullptr); // downstream
-        g_object_set(sink, "sync", FALSE, nullptr);
-        g_object_set(sink, "text-overlay", TRUE, nullptr);  // Show FPS overlay on video
-        g_object_set(sink, "fps-update-interval", 100, nullptr);  // Update FPS every 100ms
-        
-        // Add elements and link
-        gst_bin_add_many(GST_BIN(pipeline), source, capsfilter, queue, sink, nullptr);
-        if (!gst_element_link_many(source, capsfilter, queue, sink, nullptr)) {
-            g_printerr("Failed to link GStreamer elements\n");
-            return false;
-        }
-        
-        return true;
-    }
+    );
     
-    bool start() {
-        if (!pipeline) {
-            g_printerr("Pipeline not initialized\n");
-            return false;
-        }
-        
-        GstStateChangeReturn ret = gst_element_set_state(pipeline, GST_STATE_PLAYING);
-        if (ret == GST_STATE_CHANGE_FAILURE) {
-            g_printerr("Failed to start pipeline\n");
-            return false;
-        }
-        
-        return true;
-    }
-    
-    void stop() {
-        if (pipeline) {
-            gst_element_set_state(pipeline, GST_STATE_NULL);
-        }
-    }
-    
-    ~CameraPipeline() {
-        stop();
-        if (pipeline) {
-            gst_object_unref(pipeline);
-        }
-    }
+    bool start();
+    void stop();
 };
-
-#endif // CAMERA_CAPTURE_PIPELINE_H
