@@ -37,6 +37,7 @@ public:
     bool initialize(const std::string& output_dir);
     void tick(const std::unordered_map<std::string, FrameData>& frame_data_by_device);
     void report();
+    void print_live_metrics() const;
     
 };
 

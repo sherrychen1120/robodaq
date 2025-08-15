@@ -135,3 +135,30 @@ void PerformanceMonitor::report() {
     
     std::cout << "========================\n" << std::endl;
 }
+
+void PerformanceMonitor::print_live_metrics() const {
+    std::cout << "\r[LIVE] Frames: " << num_frames_;
+    
+    if (!mean_latency_by_device_.empty()) {
+        std::cout << " | Latency: ";
+        bool first = true;
+        for (const auto& pair : mean_latency_by_device_) {
+            if (!first) std::cout << ", ";
+            std::cout << pair.first.substr(pair.first.find_last_of('/') + 1) << ":" 
+                      << std::fixed << std::setprecision(1) << pair.second << "us";
+            first = false;
+        }
+    }
+    
+    if (!seq_gap_count_by_device_.empty()) {
+        std::cout << " | Gaps: ";
+        bool first = true;
+        for (const auto& pair : seq_gap_count_by_device_) {
+            if (!first) std::cout << ", ";
+            std::cout << pair.first.substr(pair.first.find_last_of('/') + 1) << ":" << pair.second;
+            first = false;
+        }
+    }
+    
+    std::cout << std::flush;
+}

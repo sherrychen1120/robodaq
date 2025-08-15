@@ -124,18 +124,23 @@ void print_usage(const char* program_name) {
     std::cout << "Usage: " << program_name << " [OPTIONS]\n"
               << "\nOptions:\n"
               << "  --output-dir <path>    Output directory for recordings (required)\n"
+              << "  --duration <seconds>   Recording duration in seconds (default: unlimited)\n"
               << "  --display              Enable display mode (default: headless)\n"
+              << "  --live-metrics         Show live metrics every 2 seconds during recording\n"
               << "  --help                 Show this help message\n"
-              << "\nExample:\n"
+              << "\nExamples:\n"
               << "  " << program_name << " --output-dir /path/to/recordings\n"
-              << "  " << program_name << " --output-dir ./recordings --display\n"
+              << "  " << program_name << " --output-dir ./recordings --display --duration 60\n"
+              << "  " << program_name << " --output-dir ./recordings --live-metrics --duration 120\n"
               << std::endl;
 }
 
 int main(int argc, char** argv) {
-    // Default to APPSINK mode, but allow DISPLAY mode with --display flag
+    // Default values
     SinkMode mode = SinkMode::APPSINK;
     std::string output_dir = "";
+    int duration_seconds = 0; // 0 means unlimited
+    bool live_metrics = false;
     
     // Parse command-line arguments
     for (int i = 1; i < argc; i++) {
@@ -146,12 +151,33 @@ int main(int argc, char** argv) {
             return 0;
         } else if (arg == "--display") {
             mode = SinkMode::DISPLAY;
+        } else if (arg == "--live-metrics") {
+            live_metrics = true;
         } else if (arg == "--output-dir") {
             if (i + 1 < argc) {
                 output_dir = std::string(argv[i + 1]);
                 i++; // Skip next argument since we consumed it
             } else {
                 std::cerr << "Error: --output-dir requires a directory path\n" << std::endl;
+                print_usage(argv[0]);
+                return 1;
+            }
+        } else if (arg == "--duration") {
+            if (i + 1 < argc) {
+                try {
+                    duration_seconds = std::stoi(argv[i + 1]);
+                    if (duration_seconds <= 0) {
+                        std::cerr << "Error: --duration must be a positive integer\n" << std::endl;
+                        return 1;
+                    }
+                    i++; // Skip next argument since we consumed it
+                } catch (const std::exception& e) {
+                    std::cerr << "Error: Invalid duration value '" << argv[i + 1] << "'\n" << std::endl;
+                    print_usage(argv[0]);
+                    return 1;
+                }
+            } else {
+                std::cerr << "Error: --duration requires a number of seconds\n" << std::endl;
                 print_usage(argv[0]);
                 return 1;
             }
@@ -171,10 +197,16 @@ int main(int argc, char** argv) {
     
     std::cout << "Starting recorder with output directory: " << output_dir << std::endl;
     std::cout << "Mode: " << (mode == SinkMode::DISPLAY ? "DISPLAY" : "HEADLESS") << std::endl;
+    if (duration_seconds > 0) {
+        std::cout << "Recording duration: " << duration_seconds << " seconds" << std::endl;
+    } else {
+        std::cout << "Recording duration: unlimited (press Ctrl+C to stop)" << std::endl;
+    }
+    std::cout << "Live metrics: " << (live_metrics ? "enabled" : "disabled") << std::endl;
     
     Recorder recorder(output_dir);
     
-    if (!recorder.run(mode)) {
+    if (!recorder.run(mode, duration_seconds, live_metrics)) {
         return 1;
     }
     return 0;

@@ -58,6 +58,8 @@ class Recorder {
 
         std::string output_dir_;
 
+        uint64_t start_timestamp_us_;
+
         // Unified camera frame callback
         void on_camera_frame(const CameraFrame& frame, bool trigger_record);
         
@@ -77,5 +79,5 @@ class Recorder {
     public:
         Recorder(const std::string& output_dir);
         
-        bool run(SinkMode mode);
+        bool run(SinkMode mode, int duration_seconds = 0, bool live_metrics = false);
 };

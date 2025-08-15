@@ -30,7 +30,7 @@ void signal_handler(int signal) {
 
 // Recorder constructor
 Recorder::Recorder(const std::string& output_dir) 
-    : sync_tolerance_us_(SYNC_TOLERANCE_US), output_dir_(output_dir) {
+    : sync_tolerance_us_(SYNC_TOLERANCE_US), output_dir_(output_dir), start_timestamp_us_(0) {
     // Initialize ring buffers (capacity of 100 frames each)
     front_buffer_ = std::make_unique<SPSCRingBuffer<CameraFrame>>(100);
     right_buffer_ = std::make_unique<SPSCRingBuffer<CameraFrame>>(100);
@@ -44,19 +44,24 @@ Recorder::Recorder(const std::string& output_dir)
 
 // Unified camera frame callback
 void Recorder::on_camera_frame(const CameraFrame& frame, bool trigger_record) {    
-    // Store frame in appropriate buffer for synchronization
+    SPSCRingBuffer<CameraFrame>* buffer = nullptr;
     if (frame.device_name == "/dev/cam_front") {
-        if (front_buffer_ && !front_buffer_->push(frame)) {
-            std::cerr << "[FRONT] Ring buffer full, dropping frame" << std::endl;
-        }
-        // Trigger recording if this is the front camera with trigger_record=true
-        if (trigger_record) {
-            should_tick_.store(true);
-        }
+        buffer = front_buffer_.get();
     } else if (frame.device_name == "/dev/cam_right") {
-        if (right_buffer_ && !right_buffer_->push(frame)) {
-            std::cerr << "[RIGHT] Ring buffer full, dropping frame" << std::endl;
+        buffer = right_buffer_.get();
+    }
+
+    if (buffer && !buffer->push(frame)) {
+        std::cerr << "[" << frame.device_name << "] Ring buffer full, dropping frame" << std::endl;
+    }
+
+    // Trigger recording if this is the front camera with trigger_record=true
+    if (trigger_record) {
+        // Set the first front camera as the start timestamp for this recording.
+        if (start_timestamp_us_ == 0) {
+            start_timestamp_us_ = frame.timestamp_us;
         }
+        should_tick_.store(true);
     }
 }
 
@@ -65,72 +70,74 @@ void Recorder::sync_thread_func() {
     const auto poll_interval = std::chrono::microseconds(100); // 10kHz polling
     
     while (keep_running) {
-        if (should_tick_.load()) {
-            should_tick_.store(false);
-            
-            // Try to get front frame
-            CameraFrame front_frame;
-            CameraFrame right_frame;
-            if (front_buffer_ && front_buffer_->pop(front_frame)) {
-                // Look for matching right frame
-                bool found_match = false;
-                
-                // Keep popping right frames until we find one within tolerance
-                uint64_t time_diff = 0;
-                while (right_buffer_ && right_buffer_->pop(right_frame)) {
-                    time_diff = std::abs(
-                        static_cast<int64_t>(right_frame.timestamp_us) 
-                        - static_cast<int64_t>(front_frame.timestamp_us)
-                    );
-                    
-                    if (time_diff <= sync_tolerance_us_) {
-                        found_match = true;
-                        break;
-                    }
-                    // If right frame is too old, continue to next one
-                    // If right frame is too new, we missed the sync window
-                    if (right_frame.timestamp_us > front_frame.timestamp_us + sync_tolerance_us_) {
-                        break;
-                    }
-                }
-                
-                if (found_match) {
-                    // std::cout << "SYNC: Seq=" << front_frame.sequence_number 
-                    //           << " Front ts=" << front_frame.timestamp_us 
-                    //           << " Right ts=" << right_frame.timestamp_us
-                    //           << " diff=" << time_diff
-                    //           << "us" << " < tol=" << sync_tolerance_us_ << "us" << std::endl;
-                    
-                    // Write frame to video file
-                    int latency_front, latency_right;
-                    front_video_writer_->write_frame(front_frame, latency_front);
-                    right_video_writer_->write_frame(right_frame, latency_right);
+        if (!should_tick_.load()) {
+            std::this_thread::sleep_for(poll_interval);
+            continue;
+        }
+        should_tick_.store(false);
+        
+        CameraFrame front_frame;
+        CameraFrame right_frame;
 
-                    // Log sync event to JSONL file
-                    if (sync_logger_) {
-                        sync_logger_->log_sync_event(
-                            front_frame.timestamp_us,
-                            front_frame.sequence_number,
-                            right_frame.sequence_number,
-                            front_frame.sequence_number  // Use front frame's seq as aggregate seq
-                        );
-                    }
-                    
-                    // Update performance monitor
-                    if (performance_monitor_) {
-                        std::unordered_map<std::string, FrameData> frame_data_by_device = {
-                            {front_frame.device_name, {front_frame.timestamp_us, front_frame.sequence_number, latency_front}},
-                            {right_frame.device_name, {right_frame.timestamp_us, right_frame.sequence_number, latency_right}}
-                        };
-                        performance_monitor_->tick(frame_data_by_device);
-                    }
-                } else {
-                    std::cout << "SYNC: No matching right frame for front ts=" << front_frame.timestamp_us << std::endl;
-                }
+        // Try to get front frame
+        if (!front_buffer_ || !front_buffer_->pop(front_frame)) {
+            continue;
+        }
+        // Look for matching right frame
+        bool found_match = false;
+            
+        // Keep popping right frames until we find one within tolerance
+        uint64_t time_diff = 0;
+        while (right_buffer_ && right_buffer_->pop(right_frame)) {
+            time_diff = std::abs(
+                static_cast<int64_t>(right_frame.timestamp_us) 
+                - static_cast<int64_t>(front_frame.timestamp_us)
+            );
+            
+            if (time_diff <= sync_tolerance_us_) {
+                found_match = true;
+                break;
+            }
+            // If right frame is too old, continue to next one
+            // If right frame is too new, we missed the sync window
+            if (right_frame.timestamp_us > front_frame.timestamp_us + sync_tolerance_us_) {
+                break;
             }
         }
+            
+        if (!found_match) {
+            std::cout << "SYNC: No matching right frame for front ts=" << front_frame.timestamp_us << std::endl;
+            continue;
+        }
+        // std::cout << "SYNC: Seq=" << front_frame.sequence_number 
+        //           << " Front ts=" << front_frame.timestamp_us 
+        //           << " Right ts=" << right_frame.timestamp_us
+        //           << " diff=" << time_diff
+        //           << "us" << " < tol=" << sync_tolerance_us_ << "us" << std::endl;
         
-        std::this_thread::sleep_for(poll_interval);
+        // Write frame to video file
+        int latency_front, latency_right;
+        front_video_writer_->write_frame(front_frame, latency_front);
+        right_video_writer_->write_frame(right_frame, latency_right);
+
+        // Log sync event to JSONL file
+        if (sync_logger_) {
+            sync_logger_->log_sync_event(
+                front_frame.timestamp_us,
+                front_frame.sequence_number,
+                right_frame.sequence_number,
+                front_frame.sequence_number  // Use front frame's seq as aggregate seq
+            );
+        }
+        
+        // Update performance monitor
+        if (performance_monitor_) {
+            std::unordered_map<std::string, FrameData> frame_data_by_device = {
+                {front_frame.device_name, {front_frame.timestamp_us, front_frame.sequence_number, latency_front}},
+                {right_frame.device_name, {right_frame.timestamp_us, right_frame.sequence_number, latency_right}}
+            };
+            performance_monitor_->tick(frame_data_by_device);
+        }
     }
 }
 
@@ -163,7 +170,7 @@ bool Recorder::start_pipeline(
     return true;
 }
 
-bool Recorder::run(SinkMode mode) {
+bool Recorder::run(SinkMode mode, int duration_seconds, bool live_metrics) {
     // Set up signal handler for graceful shutdown
     signal(SIGINT, signal_handler);
     signal(SIGTERM, signal_handler);
@@ -220,11 +227,51 @@ bool Recorder::run(SinkMode mode) {
     // Start synchronization thread
     sync_thread_ = std::make_unique<std::thread>(&Recorder::sync_thread_func, this);
     
+    
+    while (start_timestamp_us_ == 0) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+
+    // Setup timing for duration and live metrics
+    uint64_t last_metrics_timestamp_us = start_timestamp_us_;
+    const int metrics_interval_us = 2 * 1e6; // 2s
+    
+    std::cout << "\nRecording started..." << std::endl;
+    if (live_metrics) {
+        std::cout << "Live metrics will update every 2 seconds." << std::endl;
+    }
+    
     // Keep the program running
     while (keep_running) {
+        auto current_timestamp_us = std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()
+        ).count();
+        
+        // Check if duration limit reached
+        if (duration_seconds > 0) {
+            auto elapsed = current_timestamp_us - start_timestamp_us_;
+            if (elapsed >= duration_seconds * 1e6) {
+                std::cout << "\nRecording duration reached (" << duration_seconds << " seconds). Stopping..." << std::endl;
+                keep_running = false;
+                break;
+            }
+        }
+        
+        // Print live metrics if enabled
+        if (live_metrics && performance_monitor_) {
+            if (current_timestamp_us - last_metrics_timestamp_us >= metrics_interval_us) {
+                performance_monitor_->print_live_metrics();
+                last_metrics_timestamp_us = current_timestamp_us;
+            }
+        }
+        
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
     
+    // Clear live metrics line and show shutdown message
+    if (live_metrics) {
+        std::cout << "\r" << std::string(80, ' ') << "\r"; // Clear the line
+    }
     std::cout << "\nShutting down..." << std::endl;
     
     // Wait for sync thread to finish
