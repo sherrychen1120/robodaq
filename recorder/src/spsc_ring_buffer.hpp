@@ -15,8 +15,7 @@ Critical Behaviors:
     Option C: Overwrite oldest data (specify if this is desired)
 */
 
-#ifndef SPSC_RING_BUFFER_H
-#define SPSC_RING_BUFFER_H
+#pragma once
 
 #include <atomic>
 #include <cassert>
@@ -120,4 +119,3 @@ bool SPSCRingBuffer<T>::is_full() const {
     return next_write == read_index_.load(std::memory_order_acquire);
 }
 
-#endif
