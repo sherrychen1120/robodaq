@@ -7,6 +7,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Configure & Build
         run: |
+          cd recorder
           mkdir -p build && cd build
           cmake ..
           make -j

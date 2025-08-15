@@ -19,7 +19,7 @@ bool VideoWriter::initialize(const std::string& path, int width, int height, dou
     return true;
 }
 
-bool VideoWriter::write_frame(const CameraFrame& frame) {
+bool VideoWriter::write_frame(const CameraFrame& frame, int& latency_us) {
     if (!is_initialized_ || !writer_) {
         std::cerr << "VideoWriter not initialized" << std::endl;
         return false;
@@ -72,6 +72,10 @@ bool VideoWriter::write_frame(const CameraFrame& frame) {
     }
     
     writer_->write(bgr_image);
+
+    auto now = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    latency_us = static_cast<int64_t>(now) - static_cast<int64_t>(frame.timestamp_us);
     return true;
 }
 

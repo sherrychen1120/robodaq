@@ -16,6 +16,7 @@
 #include "video_writer.hpp"
 #include "sync_logger.hpp"
 #include "metadata_writer.hpp"
+#include "performance_monitor.hpp"
 
 // used for synchronizing frames between the two cameras.
 // Camera frames more than this duration apart won't be considered
@@ -51,6 +52,9 @@ class Recorder {
         std::unique_ptr<VideoWriter> front_video_writer_;
         std::unique_ptr<VideoWriter> right_video_writer_;
         std::unique_ptr<SyncLogger> sync_logger_;
+        
+        // Performance monitor
+        std::unique_ptr<PerformanceMonitor> performance_monitor_;
 
         std::string output_dir_;
 

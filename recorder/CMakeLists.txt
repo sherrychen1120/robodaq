@@ -1,3 +1,12 @@
+cmake_minimum_required(VERSION 3.15)
+project(robodaq-recorder LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+if(COMMAND cmake_policy)
+    cmake_policy(SET CMP0003 NEW)
+endif(COMMAND cmake_policy)
+
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GST REQUIRED gstreamer-1.0)
 pkg_check_modules(GST_APP REQUIRED gstreamer-app-1.0)
@@ -10,6 +19,8 @@ add_executable(recorder
     src/metadata_writer.cpp
     src/metadata_writer.hpp
     src/mpmc_ring_buffer.hpp
+    src/performance_monitor.cpp
+    src/performance_monitor.hpp
     src/recorder.cpp
     src/recorder.hpp
     src/spsc_ring_buffer.hpp

@@ -39,17 +39,11 @@ Recorder::Recorder(const std::string& output_dir)
     front_video_writer_ = std::make_unique<VideoWriter>();
     right_video_writer_ = std::make_unique<VideoWriter>();
     sync_logger_ = std::make_unique<SyncLogger>();
+    performance_monitor_ = std::make_unique<PerformanceMonitor>();
 }
 
 // Unified camera frame callback
-void Recorder::on_camera_frame(const CameraFrame& frame, bool trigger_record) {
-    // Write frame to video file
-    if (frame.device_name == "/dev/cam_front" && front_video_writer_) {
-        front_video_writer_->write_frame(frame);
-    } else if (frame.device_name == "/dev/cam_right" && right_video_writer_) {
-        right_video_writer_->write_frame(frame);
-    }
-    
+void Recorder::on_camera_frame(const CameraFrame& frame, bool trigger_record) {    
     // Store frame in appropriate buffer for synchronization
     if (frame.device_name == "/dev/cam_front") {
         if (front_buffer_ && !front_buffer_->push(frame)) {
@@ -76,9 +70,9 @@ void Recorder::sync_thread_func() {
             
             // Try to get front frame
             CameraFrame front_frame;
+            CameraFrame right_frame;
             if (front_buffer_ && front_buffer_->pop(front_frame)) {
                 // Look for matching right frame
-                CameraFrame right_frame;
                 bool found_match = false;
                 
                 // Keep popping right frames until we find one within tolerance
@@ -107,6 +101,11 @@ void Recorder::sync_thread_func() {
                     //           << " diff=" << time_diff
                     //           << "us" << " < tol=" << sync_tolerance_us_ << "us" << std::endl;
                     
+                    // Write frame to video file
+                    int latency_front, latency_right;
+                    front_video_writer_->write_frame(front_frame, latency_front);
+                    right_video_writer_->write_frame(right_frame, latency_right);
+
                     // Log sync event to JSONL file
                     if (sync_logger_) {
                         sync_logger_->log_sync_event(
@@ -115,6 +114,15 @@ void Recorder::sync_thread_func() {
                             right_frame.sequence_number,
                             front_frame.sequence_number  // Use front frame's seq as aggregate seq
                         );
+                    }
+                    
+                    // Update performance monitor
+                    if (performance_monitor_) {
+                        std::unordered_map<std::string, FrameData> frame_data_by_device = {
+                            {front_frame.device_name, {front_frame.timestamp_us, front_frame.sequence_number, latency_front}},
+                            {right_frame.device_name, {right_frame.timestamp_us, right_frame.sequence_number, latency_right}}
+                        };
+                        performance_monitor_->tick(frame_data_by_device);
                     }
                 } else {
                     std::cout << "SYNC: No matching right frame for front ts=" << front_frame.timestamp_us << std::endl;
@@ -182,7 +190,8 @@ bool Recorder::run(SinkMode mode) {
     
     if (!front_video_writer_->initialize(front_video_path, width, height, fps) ||
         !right_video_writer_->initialize(right_video_path, width, height, fps) ||
-        !sync_logger_->initialize(sync_log_path)) {
+        !sync_logger_->initialize(sync_log_path) ||
+        !performance_monitor_->initialize(output_subdir)) {
         std::cerr << "Failed to initialize output files" << std::endl;
         return false;
     }
@@ -230,6 +239,11 @@ bool Recorder::run(SinkMode mode) {
     front_video_writer_->finalize();
     right_video_writer_->finalize();
     sync_logger_->finalize();
+    
+    // Generate performance report
+    if (performance_monitor_) {
+        performance_monitor_->report();
+    }
     
     // Write metadata file
     MetadataWriter::write_metadata(
