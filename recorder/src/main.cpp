@@ -120,14 +120,59 @@
 //     return 0;
 // }
 
+void print_usage(const char* program_name) {
+    std::cout << "Usage: " << program_name << " [OPTIONS]\n"
+              << "\nOptions:\n"
+              << "  --output-dir <path>    Output directory for recordings (required)\n"
+              << "  --display              Enable display mode (default: headless)\n"
+              << "  --help                 Show this help message\n"
+              << "\nExample:\n"
+              << "  " << program_name << " --output-dir /path/to/recordings\n"
+              << "  " << program_name << " --output-dir ./recordings --display\n"
+              << std::endl;
+}
+
 int main(int argc, char** argv) {
-    Recorder recorder;
-    
     // Default to APPSINK mode, but allow DISPLAY mode with --display flag
     SinkMode mode = SinkMode::APPSINK;
-    if (argc > 1 && std::string(argv[1]) == "--display") {
-        mode = SinkMode::DISPLAY;
+    std::string output_dir = "";
+    
+    // Parse command-line arguments
+    for (int i = 1; i < argc; i++) {
+        std::string arg = std::string(argv[i]);
+        
+        if (arg == "--help") {
+            print_usage(argv[0]);
+            return 0;
+        } else if (arg == "--display") {
+            mode = SinkMode::DISPLAY;
+        } else if (arg == "--output-dir") {
+            if (i + 1 < argc) {
+                output_dir = std::string(argv[i + 1]);
+                i++; // Skip next argument since we consumed it
+            } else {
+                std::cerr << "Error: --output-dir requires a directory path\n" << std::endl;
+                print_usage(argv[0]);
+                return 1;
+            }
+        } else {
+            std::cerr << "Error: Unknown argument '" << arg << "'\n" << std::endl;
+            print_usage(argv[0]);
+            return 1;
+        }
     }
+    
+    // Validate required arguments
+    if (output_dir.empty()) {
+        std::cerr << "Error: --output-dir is required\n" << std::endl;
+        print_usage(argv[0]);
+        return 1;
+    }
+    
+    std::cout << "Starting recorder with output directory: " << output_dir << std::endl;
+    std::cout << "Mode: " << (mode == SinkMode::DISPLAY ? "DISPLAY" : "HEADLESS") << std::endl;
+    
+    Recorder recorder(output_dir);
     
     if (!recorder.run(mode)) {
         return 1;
